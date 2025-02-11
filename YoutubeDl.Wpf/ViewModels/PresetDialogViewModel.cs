@@ -1,5 +1,4 @@
-﻿using DynamicData;
-using ReactiveUI;
+﻿using ReactiveUI;
 using ReactiveUI.Fody.Helpers;
 using ReactiveUI.Validation.Helpers;
 using System;
@@ -14,9 +13,9 @@ namespace YoutubeDl.Wpf.ViewModels;
 
 public class PresetDialogViewModel : ReactiveValidationObject
 {
-    private readonly List<BackendArgument> _backendArguments = new();
-    private readonly AddArgumentViewModel _addArgumentViewModel;
+    private readonly List<BackendArgument> _backendArguments = [];
     private readonly Action<bool> _controlDialogAction;
+    private Preset? _preset;
     private Action<Preset>? _saveAction;
 
     [Reactive]
@@ -34,7 +33,7 @@ public class PresetDialogViewModel : ReactiveValidationObject
     [Reactive]
     public bool IsYtdlpSupported { get; set; } = true;
 
-    public ObservableCollection<object> ArgumentChips { get; set; } = new();
+    public ObservableCollection<object> ArgumentChips { get; set; } = [];
 
     public ReactiveCommand<Unit, Unit> SaveCommand { get; }
 
@@ -42,8 +41,12 @@ public class PresetDialogViewModel : ReactiveValidationObject
 
     public PresetDialogViewModel(Action<bool> controlDialogAction)
     {
-        _addArgumentViewModel = new(AddArgument);
         _controlDialogAction = controlDialogAction;
+
+        ArgumentChips =
+        [
+            new AddArgumentViewModel(AddArgument),
+        ];
 
         var canSave = this.WhenAnyValue(
             x => x.Name,
@@ -59,13 +62,14 @@ public class PresetDialogViewModel : ReactiveValidationObject
             x => x.ContainerArg,
             x => x.IsYtdlSupported,
             x => x.IsYtdlpSupported)
-            .Throttle(TimeSpan.FromSeconds(0.1))
+            .Throttle(TimeSpan.FromSeconds(0.25))
             .ObserveOn(RxApp.MainThreadScheduler)
-            .Subscribe(_ => GenerateArgumentChips());
+            .Subscribe(((string formatArg, string containerArg, bool isYtdlSupported, bool isYtdlpSupported) x) => UpdatePreset(x.formatArg, x.containerArg, x.isYtdlSupported, x.isYtdlpSupported));
     }
 
     public void AddOrEditPreset(Preset preset, Action<Preset> saveAction)
     {
+        _preset = preset;
         _saveAction = saveAction;
         LoadPreset(preset);
         OpenDialog();
@@ -79,26 +83,51 @@ public class PresetDialogViewModel : ReactiveValidationObject
     {
         if (_saveAction is null)
         {
-            throw new Exception("Property SaveAction is null.");
+            throw new InvalidOperationException("Missing save action for preset.");
         }
 
         CloseDialog();
         _saveAction(ToPreset());
     }
 
+    private void LoadPresetExtraArgs(Preset preset)
+    {
+        // Calculate index of first extra argument chip.
+        var index = ArgumentChips.Count - _backendArguments.Count - 1;
+
+        // Remove extra argument chips.
+        for (var i = 0; i < _backendArguments.Count; i++)
+        {
+            ArgumentChips.RemoveAt(index);
+        }
+
+        // Clear extra arguments.
+        _backendArguments.Clear();
+
+        // Add new extra arguments.
+        foreach (var extraArg in preset.ExtraArgs)
+        {
+            AddArgument(extraArg);
+        }
+    }
+
     private void LoadPreset(Preset preset)
     {
+        LoadPresetExtraArgs(preset);
         Name = preset.Name ?? "";
         FormatArg = preset.FormatArg ?? "";
         ContainerArg = preset.ContainerArg ?? "";
         IsYtdlSupported = (preset.SupportedBackends & BackendTypes.Ytdl) == BackendTypes.Ytdl;
         IsYtdlpSupported = (preset.SupportedBackends & BackendTypes.Ytdlp) == BackendTypes.Ytdlp;
-        _backendArguments.Clear();
-        _backendArguments.AddRange(preset.ExtraArgs.Select(x => new BackendArgument(x)));
     }
 
     private Preset ToPreset()
     {
+        if (_preset is null)
+        {
+            throw new InvalidOperationException("Preset is not loaded.");
+        }
+
         var supportedBackends = BackendTypes.None;
         if (IsYtdlSupported)
         {
@@ -109,13 +138,41 @@ public class PresetDialogViewModel : ReactiveValidationObject
             supportedBackends |= BackendTypes.Ytdlp;
         }
 
-        return new(
-            string.IsNullOrEmpty(Name) ? null : Name,
-            string.IsNullOrEmpty(FormatArg) ? null : FormatArg,
-            string.IsNullOrEmpty(ContainerArg) ? null : ContainerArg,
-            supportedBackends,
-            false,
-            _backendArguments.Select(x => x.Argument).ToArray());
+        return _preset with
+        {
+            Name = Name,
+            FormatArg = string.IsNullOrEmpty(FormatArg) ? null : FormatArg,
+            ContainerArg = string.IsNullOrEmpty(ContainerArg) ? null : ContainerArg,
+            SupportedBackends = supportedBackends,
+            ExtraArgs = _backendArguments.Select(x => x.Argument).ToArray(),
+        };
+    }
+
+    private void UpdatePreset(string formatArg, string containerArg, bool isYtdlSupported, bool isYtdlpSupported)
+    {
+        if (_preset is null)
+        {
+            return;
+        }
+
+        var supportedBackends = BackendTypes.None;
+        if (isYtdlSupported)
+        {
+            supportedBackends |= BackendTypes.Ytdl;
+        }
+        if (isYtdlpSupported)
+        {
+            supportedBackends |= BackendTypes.Ytdlp;
+        }
+
+        _preset = _preset with
+        {
+            FormatArg = string.IsNullOrEmpty(formatArg) ? null : formatArg,
+            ContainerArg = string.IsNullOrEmpty(containerArg) ? null : containerArg,
+            SupportedBackends = supportedBackends,
+        };
+
+        GenerateArgumentChips(_preset);
     }
 
     private void DeleteArgumentChip(ArgumentChipViewModel item)
@@ -137,12 +194,21 @@ public class PresetDialogViewModel : ReactiveValidationObject
     }
 
     /// <summary>
-    /// Clears and regenerates all argument chips from scratch.
+    /// Generates and updates non-extra argument chips.
     /// </summary>
-    private void GenerateArgumentChips()
+    private void GenerateArgumentChips(Preset preset)
     {
-        ArgumentChips.Clear();
-        ArgumentChips.AddRange(ToPreset().ToArgs().Select(x => new ArgumentChipViewModel(new(x), false, DeleteArgumentChip)));
-        ArgumentChips.Add(_addArgumentViewModel);
+        while (ArgumentChips.Count - _backendArguments.Count - 1 > 0)
+        {
+            ArgumentChips.RemoveAt(0);
+        }
+
+        var index = 0;
+
+        foreach (var arg in preset.GetNonExtraArgs())
+        {
+            ArgumentChips.Insert(index, new ArgumentChipViewModel(new(arg), false, DeleteArgumentChip));
+            index++;
+        }
     }
 }

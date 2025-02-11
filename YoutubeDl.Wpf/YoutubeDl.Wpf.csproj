@@ -2,15 +2,15 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net6.0-windows10.0.22000.0</TargetFramework>
+    <TargetFramework>net8.0-windows10.0.22621.0</TargetFramework>
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Product>Cube YouTube Downloader</Product>
     <Authors>database64128</Authors>
-    <Version>1.10.0</Version>
+    <Version>1.13.0</Version>
     <ApplicationIcon>CubeYouTubeDownloader.ico</ApplicationIcon>
-    <Description>A simple GUI wrapper for https://github.com/ytdl-org/youtube-dl.</Description>
-    <Copyright>© 2022 database64128</Copyright>
+    <Description>WPF GUI for https://github.com/ytdl-org/youtube-dl and https://github.com/yt-dlp/yt-dlp.</Description>
+    <Copyright>© 2024 database64128</Copyright>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <PackageProjectUrl>https://github.com/database64128/youtube-dl-wpf</PackageProjectUrl>
     <PackageIcon>CubeYouTubeDownloader.png</PackageIcon>
@@ -21,6 +21,7 @@
     <PackageId>YoutubeDl.Wpf</PackageId>
     <IncludePackageReferencesDuringMarkupCompilation>true</IncludePackageReferencesDuringMarkupCompilation>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
@@ -41,14 +42,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="MaterialDesignThemes" Version="4.5.0" />
-    <PackageReference Include="ReactiveMarbles.ObservableEvents.SourceGenerator" Version="1.1.4" PrivateAssets="all" />
-    <PackageReference Include="ReactiveUI.Fody" Version="18.0.10" />
-    <PackageReference Include="ReactiveUI.Validation" Version="2.2.1" />
-    <PackageReference Include="ReactiveUI.WPF" Version="18.0.10" />
-    <PackageReference Include="Serilog" Version="2.11.0" />
-    <PackageReference Include="Serilog.Sinks.File" Version="5.0.0" />
-    <PackageReference Include="Splat.Serilog" Version="14.2.8" />
+    <PackageReference Include="MaterialDesignThemes" Version="5.2.1" />
+    <PackageReference Include="ReactiveMarbles.ObservableEvents.SourceGenerator" Version="1.3.1" PrivateAssets="all" />
+    <PackageReference Include="ReactiveUI.Fody" Version="19.5.41" />
+    <PackageReference Include="ReactiveUI.Validation" Version="4.1.1" />
+    <PackageReference Include="ReactiveUI.WPF" Version="20.1.63" />
+    <PackageReference Include="Serilog" Version="4.2.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+    <PackageReference Include="Splat.Serilog" Version="15.3.1" />
   </ItemGroup>
 
   <ItemGroup>

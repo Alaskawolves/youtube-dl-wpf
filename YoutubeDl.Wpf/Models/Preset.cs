@@ -10,9 +10,9 @@ public record Preset(
     bool IsPredefined = false,
     params string[] ExtraArgs)
 {
-    public string DisplayName => Name ?? FormatArg ?? ContainerArg ?? "Auto";
+    public string DisplayName => Name ?? FormatArg ?? ContainerArg ?? "unnamed";
 
-    public IEnumerable<string> ToArgs()
+    public IEnumerable<string> GetNonExtraArgs()
     {
         if (this == Auto)
         {
@@ -33,6 +33,14 @@ public record Preset(
             yield return option;
             yield return ContainerArg;
         }
+    }
+
+    public IEnumerable<string> ToArgs()
+    {
+        foreach (var arg in GetNonExtraArgs())
+        {
+            yield return arg;
+        }
 
         foreach (var extraArg in ExtraArgs)
         {
@@ -40,10 +48,14 @@ public record Preset(
         }
     }
 
-    public static readonly Preset Auto = new(IsPredefined: true);
+    public const string AutoName = "Auto";
+
+    public static readonly Preset Auto = new(AutoName, IsPredefined: true);
+
+    public static readonly Preset Empty = new();
 
     public static readonly Preset[] PredefinedPresets =
-    {
+    [
         Auto,
         new(FormatArg: "bestvideo+bestaudio/best", IsPredefined: true),
         new(FormatArg: "bestvideo+bestaudio", IsPredefined: true),
@@ -93,5 +105,5 @@ public record Preset(
         new(ContainerArg: "ogg", IsPredefined: true),
         new(ContainerArg: "m4a", IsPredefined: true),
         new(ContainerArg: "mp3", IsPredefined: true),
-    };
+    ];
 }

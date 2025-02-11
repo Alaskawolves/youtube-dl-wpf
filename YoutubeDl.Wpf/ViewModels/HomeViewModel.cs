@@ -10,6 +10,8 @@ using System.IO;
 using System.Linq;
 using System.Reactive;
 using System.Reactive.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using YoutubeDl.Wpf.Models;
 using YoutubeDl.Wpf.Utils;
 
@@ -22,7 +24,7 @@ namespace YoutubeDl.Wpf.ViewModels
 
         public PackIconKind TabItemHeaderIconKind { get; }
 
-        public Settings Settings { get; }
+        public ObservableSettings SharedSettings { get; }
 
         public BackendService BackendService { get; }
 
@@ -32,40 +34,50 @@ namespace YoutubeDl.Wpf.ViewModels
 
         public PresetDialogViewModel PresetDialogVM { get; }
 
-        public ObservableCollection<Preset> Presets { get; } = new();
+        public ObservableCollection<Preset> Presets { get; } = [];
+
+        /// <summary>
+        /// Gets the output template history.
+        /// This collection was first constructed from <see cref="ObservableSettings.OutputTemplateHistory"/> in reverse order.
+        /// So the newest template is always the first element.
+        /// </summary>
+        public ObservableCollection<HistoryItemViewModel> OutputTemplateHistory { get; }
 
         /// <summary>
         /// Gets the download path history.
-        /// This collection was first constructed from <see cref="Settings.DownloadPathHistory"/> in reverse order.
+        /// This collection was first constructed from <see cref="ObservableSettings.DownloadPathHistory"/> in reverse order.
         /// So the newest path is always the first element.
         /// </summary>
-        public ObservableCollection<DownloadPathItemViewModel> DownloadPathHistory { get; } = new();
+        public ObservableCollection<HistoryItemViewModel> DownloadPathHistory { get; }
 
         /// <summary>
         /// Gets the collection of view models of the arguments area.
         /// A view model in this collection must be of either
         /// <see cref="ArgumentChipViewModel"/> or <see cref="AddArgumentViewModel"/> type.
         /// </summary>
-        public ObservableCollection<object> DownloadArguments { get; } = new();
+        public ObservableCollection<object> DownloadArguments { get; }
 
         [Reactive]
         public string Link { get; set; } = "";
 
-        public ReactiveCommand<Unit, Unit> ResetCustomFilenameTemplateCommand { get; }
+        [Reactive]
+        public string PlaylistItems { get; set; } = "";
+
+        public ReactiveCommand<Unit, Unit> ResetCustomOutputTemplateCommand { get; }
         public ReactiveCommand<Unit, Unit> BrowseDownloadFolderCommand { get; }
         public ReactiveCommand<Unit, Unit> OpenDownloadFolderCommand { get; }
-        public ReactiveCommand<Unit, Unit> StartDownloadCommand { get; }
-        public ReactiveCommand<Unit, Unit> ListFormatsCommand { get; }
-        public ReactiveCommand<Unit, Unit> AbortDlCommand { get; }
+        public ReactiveCommand<string, Unit> StartDownloadCommand { get; }
+        public ReactiveCommand<string, Unit> ListFormatsCommand { get; }
+        public ReactiveCommand<Unit, Unit> AbortCommand { get; }
 
         public ReactiveCommand<Unit, Unit> OpenAddCustomPresetDialogCommand { get; }
         public ReactiveCommand<Unit, Unit> OpenEditCustomPresetDialogCommand { get; }
         public ReactiveCommand<Unit, Unit> DuplicatePresetCommand { get; }
         public ReactiveCommand<Unit, Unit> DeleteCustomPresetCommand { get; }
 
-        public HomeViewModel(Settings settings, BackendService backendService, QueuedTextBoxSink queuedTextBoxSink, PresetDialogViewModel presetDialogViewModel, ISnackbarMessageQueue snackbarMessageQueue)
+        public HomeViewModel(ObservableSettings settings, BackendService backendService, QueuedTextBoxSink queuedTextBoxSink, PresetDialogViewModel presetDialogViewModel, ISnackbarMessageQueue snackbarMessageQueue)
         {
-            Settings = settings;
+            SharedSettings = settings;
             BackendService = backendService;
             BackendInstance = backendService.CreateInstance();
             QueuedTextBoxSink = queuedTextBoxSink;
@@ -80,6 +92,11 @@ namespace YoutubeDl.Wpf.ViewModels
                 2 => today.Day switch
                 {
                     14 => PackIconKind.Heart,
+                    _ => defaultIcon,
+                },
+                5 => today.Day switch
+                {
+                    8 => PackIconKind.Cake,
                     _ => defaultIcon,
                 },
                 10 => today.Day switch
@@ -100,40 +117,43 @@ namespace YoutubeDl.Wpf.ViewModels
                 _ => defaultIcon,
             };
 
-            this.WhenAnyValue(x => x.Settings.Backend)
+            this.WhenAnyValue(x => x.SharedSettings.Backend)
                 .Subscribe(_ =>
                 {
                     Presets.Clear();
-                    Presets.AddRange(Settings.CustomPresets.Where(x => (x.SupportedBackends & Settings.Backend) == Settings.Backend));
-                    Presets.AddRange(Preset.PredefinedPresets.Where(x => (x.SupportedBackends & Settings.Backend) == Settings.Backend));
+                    Presets.AddRange(SharedSettings.CustomPresets.AsEnumerable().Reverse().Where(x => (x.SupportedBackends & SharedSettings.Backend) == SharedSettings.Backend));
+                    Presets.AddRange(Preset.PredefinedPresets.Where(x => (x.SupportedBackends & SharedSettings.Backend) == SharedSettings.Backend));
                 });
 
-            DownloadPathHistory.AddRange(Settings.DownloadPathHistory.Select(x => new DownloadPathItemViewModel(x, DeleteDownloadPathItem)).Reverse());
-
-            DownloadArguments.AddRange(Settings.BackendDownloadArguments.Select(x => new ArgumentChipViewModel(x, true, DeleteArgumentChip)));
-            DownloadArguments.Add(new AddArgumentViewModel(AddArgument));
+            OutputTemplateHistory = new(SharedSettings.OutputTemplateHistory.Select(x => new HistoryItemViewModel(x, DeleteOutputTemplateItem)).Reverse());
+            DownloadPathHistory = new(SharedSettings.DownloadPathHistory.Select(x => new HistoryItemViewModel(x, DeleteDownloadPathItem)).Reverse());
+            DownloadArguments = new(SharedSettings.BackendDownloadArguments.Select(x => new ArgumentChipViewModel(x, true, DeleteArgumentChip)))
+            {
+                new AddArgumentViewModel(AddArgument),
+            };
 
             var gdaA = this.WhenAnyValue(
-                x => x.Settings.Backend,
-                x => x.Settings.FfmpegPath,
-                x => x.Settings.Proxy,
-                x => x.Settings.SelectedPreset)
+                x => x.SharedSettings.Backend,
+                x => x.SharedSettings.FfmpegPath,
+                x => x.SharedSettings.Proxy,
+                x => x.SharedSettings.SelectedPreset)
                 .Select(_ => Unit.Default);
 
             var gdaB = this.WhenAnyValue(
-                x => x.Settings.DownloadSubtitles,
-                x => x.Settings.DownloadSubtitlesAllLanguages,
-                x => x.Settings.DownloadAutoGeneratedSubtitles,
-                x => x.Settings.AddMetadata,
-                x => x.Settings.DownloadThumbnail,
-                x => x.Settings.DownloadPlaylist)
+                x => x.SharedSettings.DownloadSubtitles,
+                x => x.SharedSettings.DownloadSubtitlesAllLanguages,
+                x => x.SharedSettings.DownloadAutoGeneratedSubtitles,
+                x => x.SharedSettings.AddMetadata,
+                x => x.SharedSettings.DownloadThumbnail,
+                x => x.SharedSettings.DownloadPlaylist,
+                x => x.PlaylistItems)
                 .Select(_ => Unit.Default);
 
             var gdaC = this.WhenAnyValue(
-                x => x.Settings.UseCustomOutputTemplate,
-                x => x.Settings.CustomOutputTemplate,
-                x => x.Settings.UseCustomPath,
-                x => x.Settings.DownloadPath)
+                x => x.SharedSettings.UseCustomOutputTemplate,
+                x => x.SharedSettings.CustomOutputTemplate,
+                x => x.SharedSettings.UseCustomPath,
+                x => x.SharedSettings.DownloadPath)
                 .Select(_ => Unit.Default);
 
             Observable.Merge(gdaA, gdaB, gdaC)
@@ -141,70 +161,73 @@ namespace YoutubeDl.Wpf.ViewModels
                       .ObserveOn(RxApp.MainThreadScheduler)
                       .Subscribe(_ => GenerateDownloadArguments());
 
-            Settings.BackendGlobalArguments.ToObservableChangeSet()
+            SharedSettings.BackendGlobalArguments.ToObservableChangeSet()
                                            .ObserveOn(RxApp.MainThreadScheduler)
                                            .Subscribe(_ => GenerateGlobalArguments());
 
-            var canResetCustomFilenameTemplate = this.WhenAnyValue(
-                x => x.Settings.UseCustomOutputTemplate,
-                x => x.Settings.CustomOutputTemplate,
-                (useTemplate, template) => useTemplate && template != Settings.DefaultCustomFilenameTemplate);
+            var canResetCustomOutputTemplate = this.WhenAnyValue(
+                x => x.SharedSettings.UseCustomOutputTemplate,
+                x => x.SharedSettings.CustomOutputTemplate,
+                (useTemplate, template) => useTemplate && template != Settings.DefaultCustomOutputTemplate);
 
-            var canBrowseDownloadFolder = this.WhenAnyValue(x => x.Settings.UseCustomPath);
+            var canBrowseDownloadFolder = this.WhenAnyValue(x => x.SharedSettings.UseCustomPath);
 
             var canOpenDownloadFolder = this.WhenAnyValue(
-                x => x.Settings.UseCustomPath,
-                x => x.Settings.DownloadPath,
+                x => x.SharedSettings.UseCustomPath,
+                x => x.SharedSettings.DownloadPath,
                 (useCustomPath, path) => useCustomPath && Directory.Exists(path));
 
-            var canStartDl = this.WhenAnyValue(
+            var canRun = this.WhenAnyValue(
                 x => x.Link,
-                x => x.Settings.UseCustomPath,
-                x => x.Settings.DownloadPath,
-                x => x.Settings.BackendPath,
                 x => x.BackendInstance.IsRunning,
-                (link, useCustomPath, downloadPath, dlBinaryPath, isRunning) =>
+                x => x.SharedSettings.UseCustomOutputTemplate,
+                x => x.SharedSettings.UseCustomPath,
+                x => x.SharedSettings.CustomOutputTemplate,
+                x => x.SharedSettings.DownloadPath,
+                x => x.SharedSettings.BackendPath,
+                (link, isRunning, useCustomOutputTemplate, useCustomPath, outputTemplate, downloadPath, backendPath) =>
                     !string.IsNullOrEmpty(link) &&
+                    !isRunning &&
+                    (!useCustomOutputTemplate || !string.IsNullOrEmpty(outputTemplate)) &&
                     (!useCustomPath || Directory.Exists(downloadPath)) &&
-                    !string.IsNullOrEmpty(dlBinaryPath) &&
-                    !isRunning);
+                    !string.IsNullOrEmpty(backendPath));
 
-            var canAbortDl = this.WhenAnyValue(x => x.BackendInstance.IsRunning);
+            var canAbort = this.WhenAnyValue(x => x.BackendInstance.IsRunning);
 
             var canEditOrDeletePreset = this.WhenAnyValue(
-                x => x.Settings.SelectedPreset,
+                x => x.SharedSettings.SelectedPreset,
                 selectedPreset => selectedPreset is not null && !selectedPreset.IsPredefined);
 
             var canDuplicatePreset = this.WhenAnyValue(
-                x => x.Settings.SelectedPreset,
-                selectedPreset => selectedPreset is not null && selectedPreset != Preset.Auto);
+                x => x.SharedSettings.SelectedPreset,
+                (Preset? selectedPreset) => selectedPreset is not null);
 
-            ResetCustomFilenameTemplateCommand = ReactiveCommand.Create(ResetCustomFilenameTemplate, canResetCustomFilenameTemplate);
+            ResetCustomOutputTemplateCommand = ReactiveCommand.Create(ResetCustomOutputTemplate, canResetCustomOutputTemplate);
             BrowseDownloadFolderCommand = ReactiveCommand.Create(BrowseDownloadFolder, canBrowseDownloadFolder);
             OpenDownloadFolderCommand = ReactiveCommand.Create(OpenDownloadFolder, canOpenDownloadFolder);
-            StartDownloadCommand = ReactiveCommand.Create(StartDownload, canStartDl);
-            ListFormatsCommand = ReactiveCommand.Create(ListFormats, canStartDl);
-            AbortDlCommand = ReactiveCommand.CreateFromTask(BackendInstance.AbortDl, canAbortDl);
+            StartDownloadCommand = ReactiveCommand.CreateFromTask<string>(StartDownloadAsync, canRun);
+            ListFormatsCommand = ReactiveCommand.CreateFromTask<string>(BackendInstance.ListFormatsAsync, canRun);
+            AbortCommand = ReactiveCommand.CreateFromTask(BackendInstance.AbortAsync, canAbort);
 
             OpenAddCustomPresetDialogCommand = ReactiveCommand.Create(OpenAddCustomPresetDialog);
             OpenEditCustomPresetDialogCommand = ReactiveCommand.Create(OpenEditCustomPresetDialog, canEditOrDeletePreset);
             DuplicatePresetCommand = ReactiveCommand.Create(DuplicatePreset, canDuplicatePreset);
             DeleteCustomPresetCommand = ReactiveCommand.Create(DeleteCustomPreset, canEditOrDeletePreset);
 
-            if (Settings.BackendAutoUpdate && !string.IsNullOrEmpty(Settings.BackendPath))
+            if (SharedSettings.BackendAutoUpdate && !string.IsNullOrEmpty(SharedSettings.BackendPath))
             {
-                BackendInstance.UpdateDl();
+                _ = BackendInstance.UpdateAsync();
             }
         }
 
         private void AddCustomPreset(Preset preset)
         {
-            Settings.CustomPresets.Add(preset);
+            SharedSettings.CustomPresets.Add(preset);
 
-            if ((preset.SupportedBackends & Settings.Backend) == Settings.Backend)
+            if ((preset.SupportedBackends & SharedSettings.Backend) == SharedSettings.Backend)
             {
                 Presets.Insert(0, preset);
-                Settings.SelectedPreset = Presets.First();
+                SharedSettings.SelectedPreset = Presets.First();
             }
         }
 
@@ -214,39 +237,61 @@ namespace YoutubeDl.Wpf.ViewModels
             AddCustomPreset(preset);
         }
 
-        private void OpenAddCustomPresetDialog() => PresetDialogVM.AddOrEditPreset(Preset.Auto, AddCustomPreset);
+        private void OpenAddCustomPresetDialog() => PresetDialogVM.AddOrEditPreset(Preset.Empty, AddCustomPreset);
 
-        private void OpenEditCustomPresetDialog() => PresetDialogVM.AddOrEditPreset(Settings.SelectedPreset!, EditCustomPreset);
+        private void OpenEditCustomPresetDialog() => PresetDialogVM.AddOrEditPreset(SharedSettings.SelectedPreset!, EditCustomPreset);
 
         private void DuplicatePreset()
         {
-            var dup = Settings.SelectedPreset! with { Name = $"{Settings.SelectedPreset.DisplayName} (1)", IsPredefined = false };
-            AddCustomPreset(dup);
+            var dupNum = 0;
+            string dupName;
+            var preset = SharedSettings.SelectedPreset!;
+
+            do
+            {
+                dupNum++;
+                dupName = $"{preset.DisplayName} ({dupNum})";
+            }
+            while (Presets.Any(x => x.DisplayName == dupName));
+
+            AddCustomPreset(preset with { Name = dupName, IsPredefined = false });
         }
 
         private void DeleteCustomPreset()
         {
-            var preset = Settings.SelectedPreset!;
-            Settings.CustomPresets.Remove(preset);
+            var preset = SharedSettings.SelectedPreset!;
+            SharedSettings.CustomPresets.Remove(preset);
             Presets.Remove(preset);
-            Settings.SelectedPreset = Presets.First();
+            SharedSettings.SelectedPreset = Presets.First();
         }
 
-        private void DeleteDownloadPathItem(DownloadPathItemViewModel item)
+        private void DeleteOutputTemplateItem(HistoryItemViewModel item)
         {
-            Settings.DownloadPathHistory.Remove(item.Path);
+            SharedSettings.OutputTemplateHistory.Remove(item.Text);
+            OutputTemplateHistory.Remove(item);
+        }
+
+        private void DeleteDownloadPathItem(HistoryItemViewModel item)
+        {
+            SharedSettings.DownloadPathHistory.Remove(item.Text);
             DownloadPathHistory.Remove(item);
+        }
+
+        private void UpdateOutputTemplateHistory()
+        {
+            if (!SharedSettings.OutputTemplateHistory.Contains(SharedSettings.CustomOutputTemplate))
+            {
+                SharedSettings.OutputTemplateHistory.Add(SharedSettings.CustomOutputTemplate);
+                OutputTemplateHistory.Insert(0, new(SharedSettings.CustomOutputTemplate, DeleteOutputTemplateItem));
+            }
         }
 
         private void UpdateDownloadPathHistory()
         {
-            // No need to check if path is null or empty.
-            // Because this code path can only be reached
-            // when custom path is toggled and a valid path is supplied.
-            if (!Settings.DownloadPathHistory.Contains(Settings.DownloadPath))
+            if (!SharedSettings.DownloadPathHistory.Contains(SharedSettings.DownloadPath))
             {
-                Settings.DownloadPathHistory.Add(Settings.DownloadPath);
-                DownloadPathHistory.Insert(0, new(Settings.DownloadPath, DeleteDownloadPathItem));
+                SharedSettings.DownloadPathHistory.Add(SharedSettings.DownloadPath);
+                DownloadPathHistory.Insert(0, new(SharedSettings.DownloadPath, DeleteDownloadPathItem));
             }
         }
 
@@ -254,7 +299,7 @@ namespace YoutubeDl.Wpf.ViewModels
         {
             if (item.IsRemovable)
             {
-                Settings.BackendDownloadArguments.Remove(item.Argument);
+                SharedSettings.BackendDownloadArguments.Remove(item.Argument);
                 DownloadArguments.Remove(item);
             }
         }
@@ -262,26 +307,13 @@ namespace YoutubeDl.Wpf.ViewModels
         private void AddArgument(string argument)
         {
             var backendArgument = new BackendArgument(argument);
-            Settings.BackendDownloadArguments.Add(backendArgument);
+            SharedSettings.BackendDownloadArguments.Add(backendArgument);
 
             // Insert right before AddArgumentViewModel.
             DownloadArguments.Insert(DownloadArguments.Count - 1, new ArgumentChipViewModel(backendArgument, true, DeleteArgumentChip));
         }
 
-        private void ResetCustomFilenameTemplate()
-        {
-            Settings.CustomOutputTemplate = Settings.DefaultCustomFilenameTemplate;
-        }
-
-        private void StartDownload()
-        {
-            BackendInstance.StartDownload(Link);
-        }
-
-        private void ListFormats()
-        {
-            BackendInstance.ListFormats(Link);
-        }
+        private void ResetCustomOutputTemplate() => SharedSettings.CustomOutputTemplate = Settings.DefaultCustomOutputTemplate;
 
         private void BrowseDownloadFolder()
         {
@@ -291,13 +323,13 @@ namespace YoutubeDl.Wpf.ViewModels
                 ValidateNames = false,
                 CheckFileExists = false,
                 CheckPathExists = true,
-                InitialDirectory = Settings.DownloadPath,
+                InitialDirectory = SharedSettings.DownloadPath,
             };
 
             var result = folderDialog.ShowDialog();
             if (result == true)
             {
-                Settings.DownloadPath = Path.GetDirectoryName(folderDialog.FileName) ?? "";
+                SharedSettings.DownloadPath = Path.GetDirectoryName(folderDialog.FileName) ?? "";
             }
         }
 
@@ -305,7 +337,7 @@ namespace YoutubeDl.Wpf.ViewModels
         {
             try
             {
-                WpfHelper.OpenUri(Settings.DownloadPath);
+                WpfHelper.OpenUri(SharedSettings.DownloadPath);
             }
             catch (Exception ex)
             {
@@ -322,7 +354,7 @@ namespace YoutubeDl.Wpf.ViewModels
 
             _globalArgCount = 0;
 
-            foreach (var globalArg in Settings.BackendGlobalArguments)
+            foreach (var globalArg in SharedSettings.BackendGlobalArguments)
             {
                 DownloadArguments.Insert(_globalArgCount, new ArgumentChipViewModel(globalArg, false, DeleteArgumentChip)); ;
                 _globalArgCount++;
@@ -335,17 +367,12 @@ namespace YoutubeDl.Wpf.ViewModels
         /// </summary>
         private void GenerateDownloadArguments()
         {
-            for (var i = _globalArgCount; i < _globalArgCount + BackendInstance.GeneratedDownloadArguments.Count; i++)
+            for (var i = 0; i < BackendInstance.GeneratedDownloadArguments.Count; i++)
             {
                 DownloadArguments.RemoveAt(_globalArgCount);
             }
 
-            BackendInstance.GenerateDownloadArguments();
-
-            if (Settings.UseCustomPath)
-            {
-                UpdateDownloadPathHistory();
-            }
+            BackendInstance.GenerateDownloadArguments(PlaylistItems);
 
             var pos = _globalArgCount;
 
@@ -354,6 +381,17 @@ namespace YoutubeDl.Wpf.ViewModels
                 DownloadArguments.Insert(pos, new ArgumentChipViewModel(new(arg), false, DeleteArgumentChip));
                 pos++;
             }
+        }
+
+        private Task StartDownloadAsync(string link, CancellationToken cancellationToken = default)
+        {
+            if (SharedSettings.UseCustomOutputTemplate)
+                UpdateOutputTemplateHistory();
+
+            if (SharedSettings.UseCustomPath)
+                UpdateDownloadPathHistory();
+
+            return BackendInstance.StartDownloadAsync(link, cancellationToken);
         }
     }
 }
